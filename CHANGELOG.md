@@ -1,7 +1,23 @@
 # Changelog
 
+## evdev next
+[c0bd8dd...HEAD](https://github.com/emberian/evdev/compare/c0bd8dd...HEAD)
+
+### Added
+
+- Document `FFEffect`.
+- Publicly export `FFEffect` from root.
+- Add `FFEffect::id()` as an accessor for the effect ID.
+- Add missing `EventStream::device_mut()` in `sync_stream.rs`.
+
+### Changed
+
+### Fixed
+
+- Make sure that the `DevNodesBlocking` iterator is not blocking indefinitely when all entries in the directory have been exhausted.
+
 ## evdev 0.11.6 (2022-08-03)
-[372d000...HEAD](https://github.com/emberian/evdev/compare/372d000...HEAD)
+[372d000...c0bd8dd](https://github.com/emberian/evdev/compare/372d000...c0bd8dd)
 
 ### Added
 

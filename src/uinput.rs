@@ -2,17 +2,20 @@
 //!
 //! This is quite useful when testing/debugging devices, or synchronization.
 
+use crate::compat::{input_event, input_id, uinput_abs_setup, uinput_setup, UINPUT_MAX_NAME_SIZE};
 use crate::constants::{EventType, UInputEventType};
-use crate::inputid::{BusType, InputId};
 use crate::ff::FFEffectData;
+use crate::inputid::{BusType, InputId};
 use crate::raw_stream::vec_spare_capacity_mut;
-use crate::{sys, AttributeSetRef, Error, InputEvent, InputEventKind, FFEffectType, Key, RelativeAxisType, SwitchType, UinputAbsSetup};
-use libc::uinput_abs_setup;
+use crate::{
+    sys, AttributeSetRef, Error, FFEffectType, InputEvent, InputEventKind, Key, RelativeAxisType,
+    SwitchType, UinputAbsSetup,
+};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
 use std::os::unix::prelude::RawFd;
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 const UINPUT_PATH: &str = "/dev/uinput";
@@ -23,7 +26,7 @@ const DEV_PATH: &str = "/dev/input";
 pub struct VirtualDeviceBuilder<'a> {
     file: File,
     name: &'a [u8],
-    id: Option<libc::input_id>,
+    id: Option<input_id>,
     ff_effects_max: u32,
 }
 
@@ -32,10 +35,7 @@ impl<'a> VirtualDeviceBuilder<'a> {
         let mut options = OpenOptions::new();
 
         // Open in read-write mode.
-        let file = options
-            .read(true)
-            .write(true)
-            .open(UINPUT_PATH)?;
+        let file = options.read(true).write(true).open(UINPUT_PATH)?;
 
         Ok(VirtualDeviceBuilder {
             file,
@@ -88,10 +88,7 @@ impl<'a> VirtualDeviceBuilder<'a> {
                 self.file.as_raw_fd(),
                 axis.code() as nix::sys::ioctl::ioctl_param_type,
             )?;
-            sys::ui_abs_setup(
-                self.file.as_raw_fd(),
-                &axis.0 as *const uinput_abs_setup,
-            )?;
+            sys::ui_abs_setup(self.file.as_raw_fd(), &axis.0 as *const uinput_abs_setup)?;
         }
 
         Ok(self)
@@ -165,9 +162,9 @@ impl<'a> VirtualDeviceBuilder<'a> {
     pub fn build(self) -> io::Result<VirtualDevice> {
         // Populate the uinput_setup struct
 
-        let mut usetup = libc::uinput_setup {
+        let mut usetup = uinput_setup {
             id: self.id.unwrap_or(DEFAULT_ID),
-            name: [0; libc::UINPUT_MAX_NAME_SIZE],
+            name: [0; UINPUT_MAX_NAME_SIZE],
             ff_effects_max: self.ff_effects_max,
         };
 
@@ -176,14 +173,14 @@ impl<'a> VirtualDeviceBuilder<'a> {
         // Panic if we're doing something really stupid
         // + 1 for the null terminator; usetup.name was zero-initialized so there will be null
         // bytes after the part we copy into
-        assert!(name_bytes.len() + 1 < libc::UINPUT_MAX_NAME_SIZE);
+        assert!(name_bytes.len() + 1 < UINPUT_MAX_NAME_SIZE);
         usetup.name[..name_bytes.len()].copy_from_slice(name_bytes);
 
         VirtualDevice::new(self.file, &usetup)
     }
 }
 
-const DEFAULT_ID: libc::input_id = libc::input_id {
+const DEFAULT_ID: input_id = input_id {
     bustype: BusType::BUS_USB.0,
     vendor: 0x1234,  /* sample vendor */
     product: 0x5678, /* sample product */
@@ -192,12 +189,12 @@ const DEFAULT_ID: libc::input_id = libc::input_id {
 
 pub struct VirtualDevice {
     file: File,
-    pub(crate) event_buf: Vec<libc::input_event>,
+    pub(crate) event_buf: Vec<input_event>,
 }
 
 impl VirtualDevice {
     /// Create a new virtual device.
-    fn new(file: File, usetup: &libc::uinput_setup) -> io::Result<Self> {
+    fn new(file: File, usetup: &uinput_setup) -> io::Result<Self> {
         unsafe { sys::ui_dev_setup(file.as_raw_fd(), usetup)? };
         unsafe { sys::ui_dev_create(file.as_raw_fd())? };
 
@@ -237,9 +234,7 @@ impl VirtualDevice {
         let path = self.get_syspath()?;
         let dir = std::fs::read_dir(path)?;
 
-        Ok(DevNodesBlocking {
-            dir,
-        })
+        Ok(DevNodesBlocking { dir })
     }
 
     /// Get the syspaths of the corresponding device nodes in /dev/input.
@@ -248,9 +243,7 @@ impl VirtualDevice {
         let path = self.get_syspath()?;
         let dir = tokio_1::fs::read_dir(path).await?;
 
-        Ok(DevNodes {
-            dir,
-        })
+        Ok(DevNodes { dir })
     }
 
     /// Post a batch of events to the virtual device.
@@ -285,10 +278,7 @@ impl VirtualDevice {
 
         let file = self.file.try_clone()?;
 
-        Ok(FFUploadEvent {
-            file,
-            request,
-        })
+        Ok(FFUploadEvent { file, request })
     }
 
     /// Processes the given [`UInputEvent`] if it is a force feedback erase event, in which case
@@ -310,10 +300,7 @@ impl VirtualDevice {
 
         let file = self.file.try_clone()?;
 
-        Ok(FFEraseEvent {
-            file,
-            request,
-        })
+        Ok(FFEraseEvent { file, request })
     }
 
     /// Read a maximum of `num` events into the internal buffer. If the underlying fd is not
@@ -331,7 +318,7 @@ impl VirtualDevice {
         // use libc::read instead of nix::unistd::read b/c we need to pass an uninitialized buf
         let res = unsafe { libc::read(fd, spare_capacity.as_mut_ptr() as _, spare_capacity_size) };
         let bytes_read = nix::errno::Errno::result(res)?;
-        let num_read = bytes_read as usize / std::mem::size_of::<libc::input_event>();
+        let num_read = bytes_read as usize / std::mem::size_of::<input_event>();
         unsafe {
             let len = self.event_buf.len();
             self.event_buf.set_len(len + num_read);
@@ -366,29 +353,28 @@ impl Iterator for DevNodesBlocking {
     type Item = io::Result<PathBuf>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let path = self.dir.next()
-                // Map the directory name to its file name.
-                .map(|entry| entry.map(|entry|
-                    entry.file_name().to_string_lossy().to_owned().to_string()
-                ))
-                // Ignore file names that do not start with "event".
-                .filter(|name| name
-                    .as_ref()
-                    .map(|name| name.starts_with("event"))
-                    .unwrap_or(true)
-                )
-                // Construct the path of the form `/dev/input/eventX`.
-                .map(|name| name.map(|name| {
-                    let mut path = PathBuf::from(DEV_PATH);
-                    path.push(name);
-                    path
-                }));
+        for entry in self.dir.by_ref() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => return Some(Err(e)),
+            };
 
-            if let Some(value) = path {
-                return Some(value);
+            // Map the directory name to its file name.
+            let name = entry.file_name().to_string_lossy().to_owned().to_string();
+
+            // Ignore file names that do not start with event.
+            if !name.starts_with("event") {
+                continue;
             }
+
+            // Construct the path of the form '/dev/input/eventX'.
+            let mut path: PathBuf = PathBuf::from(DEV_PATH);
+            path.push(name);
+
+            return Some(Ok(path));
         }
+
+        None
     }
 }
 
@@ -404,7 +390,10 @@ impl DevNodes {
     /// Returns the next entry in the set of device nodes.
     pub async fn next_entry(&mut self) -> io::Result<Option<PathBuf>> {
         loop {
-            let path = self.dir.next_entry().await?
+            let path = self
+                .dir
+                .next_entry()
+                .await?
                 // Map the directory name to its file name.
                 .map(|entry| entry.file_name().to_string_lossy().to_owned().to_string())
                 // Ignore file names that do not start with "event".
@@ -642,7 +631,5 @@ mod tokio_stream {
         }
     }
 }
-#[cfg(feature = "tokio")]
-pub(crate) use tokio_stream::poll_fn;
 #[cfg(feature = "tokio")]
 pub use tokio_stream::VirtualEventStream;
